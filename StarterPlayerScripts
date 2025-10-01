@@ -1,0 +1,123 @@
+-- Revised LocalScript
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService") -- Added for better camera control updates
+
+-- 1. Safely get LocalPlayer and critical services/objects
+-- This ensures 'player' isn't nil, which is the most common live-game failure.
+local player = Players.LocalPlayer
+
+-- Wait for the PlayerGui to ensure it's loaded before we try to add a GUI to it.
+local playerGui = player:WaitForChild("PlayerGui")
+local camera = workspace.CurrentCamera
+
+-- Wait for menu objects (assuming they are in the Workspace and need time to replicate)
+local menuFolder = workspace:WaitForChild("MenuFolder")
+local menuScreen = menuFolder:WaitForChild("MenuScreen")
+local playButton = menuFolder:WaitForChild("PlayButton")
+local clickDetector = playButton:WaitForChild("ClickDetector")
+
+-- Original size and scale for tweening
+local originalSize = playButton.Size
+local hoverScale = 1.1
+
+-- Create fade GUI
+local fadeGui = Instance.new("ScreenGui")
+fadeGui.Name = "FadeGui"
+fadeGui.ResetOnSpawn = false
+fadeGui.Parent = playerGui
+
+local fadeFrame = Instance.new("Frame")
+fadeFrame.Size = UDim2.new(1,0,1,0)
+fadeFrame.BackgroundColor3 = Color3.new(0,0,0)
+fadeFrame.BackgroundTransparency = 1 -- Starts transparent
+fadeFrame.Parent = fadeGui
+
+-- Fade function
+local function fadeScreen(duration, fadeIn)
+    local goal = {}
+    -- fadeIn = true means BackgroundTransparency goes from 1 to 0 (fades in to black)
+    -- fadeIn = false means BackgroundTransparency goes from 0 to 1 (fades out from black)
+    goal.BackgroundTransparency = fadeIn and 0 or 1
+    
+    local tween = TweenService:Create(fadeFrame, TweenInfo.new(duration), goal)
+    tween:Play()
+    tween.Completed:Wait() -- Pauses the function until the fade is complete
+end
+
+-- Move camera to player
+local function transitionToPlayer()
+    -- 1. Fade the screen to black
+    fadeScreen(0.5, true) 
+    
+    -- We can wait now that the screen is black
+    task.wait(0.5) 
+    
+    -- 2. Wait for the player's character to ensure it's loaded
+    local character = player.Character or player.CharacterAdded:Wait()
+    local hrp = character:WaitForChild("HumanoidRootPart")
+
+    -- 3. Set the camera to the player's position and switch type
+    camera.CFrame = hrp.CFrame
+    camera.CameraType = Enum.CameraType.Custom
+    
+    -- 4. Fade the screen out from black
+    fadeScreen(0.5, false)
+    
+    -- 5. Clean up the menu parts after the transition is complete
+    -- You may want to delete the MenuFolder in the workspace to stop hover events, etc.
+end
+
+-- Hover functions
+local function hoverStart()
+    local tween = TweenService:Create(playButton, TweenInfo.new(0.2), {Size = originalSize * hoverScale})
+    tween:Play()
+end
+
+local function hoverEnd()
+    local tween = TweenService:Create(playButton, TweenInfo.new(0.2), {Size = originalSize})
+    tween:Play()
+end
+
+-- INITIAL SETUP (Runs once when the script starts)
+
+-- 1. Lock the camera to the menu screen. Using RunService.RenderStepped is more reliable
+-- than setting the CFrame once, as the game engine might fight your initial setting.
+local cameraConnection
+
+local function lockCameraToMenu()
+    if camera.CameraType ~= Enum.CameraType.Scriptable then
+        camera.CameraType = Enum.CameraType.Scriptable
+    end
+    camera.CFrame = menuScreen.CFrame
+end
+
+-- Connect the camera lock to a rendering step to hold it firmly in place
+cameraConnection = RunService.RenderStepped:Connect(lockCameraToMenu)
+
+
+-- 2. Detect Clicks (ClickDetector events run locally for LocalScripts)
+clickDetector.MouseClick:Connect(function() -- Player argument is unnecessary in a LocalScript connection
+    -- Disconnect the camera lock immediately when clicked
+    cameraConnection:Disconnect()
+    transitionToPlayer()
+end)
+
+-- 3. Detect Hover (PC)
+playButton.MouseEnter:Connect(hoverStart)
+playButton.MouseLeave:Connect(hoverEnd)
+
+-- 4. Detect Touch (Mobile)
+-- Note: Touch events on Parts can be inconsistent for UI. A SurfaceGui button is often better.
+playButton.Touched:Connect(function(hit)
+    -- Check if the object that hit the button is part of the local player's character
+    if hit.Parent == player.Character then
+        hoverStart()
+    end
+end)
+playButton.TouchEnded:Connect(function(hit)
+    if hit.Parent == player.Character then
+        hoverEnd()
+    end
+end)
